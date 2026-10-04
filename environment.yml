@@ -1,0 +1,15 @@
+# Conda users:
+#   conda env create -f environment.yml
+#   conda activate crispra-screen
+#   pip install .
+name: crispra-screen
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy>=1.23
+  - pandas>=1.5
+  - scipy>=1.9
+  - matplotlib>=3.6
+  - requests>=2.28
+  - pip
