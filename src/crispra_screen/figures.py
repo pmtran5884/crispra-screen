@@ -63,12 +63,22 @@ def volcano(res, title, stem, formats=("png", "pdf", "svg"), fdr_cut=0.1,
     y = res[score_col].values
     x = res["mean_lfc"].values
     ctrl = res["is_control"].values
-    hit = (~ctrl) & (res["direction"].values == "enriched") & (res["fdr"].values < fdr_cut)
-    ax.scatter(x[~ctrl & ~hit], y[~ctrl & ~hit], s=7 * dot_scale, c="#c9c9c9", linewidths=0)
+    sig = res["fdr"].values < fdr_cut
+    up = (~ctrl) & sig & (res["direction"].values == "enriched")
+    dn = (~ctrl) & sig & (res["direction"].values == "depleted")
+    ax.scatter(x[~ctrl & ~up & ~dn], y[~ctrl & ~up & ~dn], s=7 * dot_scale,
+               c="#c9c9c9", linewidths=0)
     ax.scatter(x[ctrl], y[ctrl], s=14 * dot_scale, facecolors="none",
                edgecolors="#8a8a8a", linewidths=0.6, label="non-targeting control")
-    ax.scatter(x[hit], y[hit], s=34 * dot_scale, c=RED, linewidths=0,
-               label=f"enriched, FDR < {fdr_cut:g}")
+    # significance is highlighted in BOTH directions, each in its own colour, so
+    # the key is satisfied by every plotted point and a labelled gene can never
+    # be coloured as something its point is not
+    if dn.any():
+        ax.scatter(x[dn], y[dn], s=34 * dot_scale, c=BLUE, linewidths=0,
+                   label=f"depleted, FDR < {fdr_cut:g}")
+    if up.any():
+        ax.scatter(x[up], y[up], s=34 * dot_scale, c=RED, linewidths=0,
+                   label=f"enriched, FDR < {fdr_cut:g}")
 
     real = res[~res.is_control]
     pos = real[real.mean_lfc > 0].nlargest(n_pos, score_col)
@@ -89,9 +99,11 @@ def volcano(res, title, stem, formats=("png", "pdf", "svg"), fdr_cut=0.1,
         xc = (x1 - 0.015 * (x1 - x0)) if side == "right" else (x0 + 0.015 * (x1 - x0))
         placed += [(it, c, yy, side) for it, c, yy in _spread(items, xc, lo, hi)]
     for (g, gx, gy, fdr), xc, yy, side in placed:
+        col = ("#444444" if fdr >= fdr_cut
+               else (RED if res.loc[g, "direction"] == "enriched" else BLUE))
         ax.annotate(g, (gx, gy), xytext=(xc, yy), textcoords="data", va="center",
                     ha="right" if side == "right" else "left",
-                    color=RED if fdr < fdr_cut else "#444444",
+                    color=col,
                     arrowprops=dict(arrowstyle="-", lw=0.4, color="#b0b0b0",
                                     shrinkA=0, shrinkB=3))
     if not bare:

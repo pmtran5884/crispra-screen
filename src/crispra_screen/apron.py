@@ -63,27 +63,52 @@ def submit(chip_path, data_path, meta, directionality="both", top_pct=100,
     m = re.search(r"reqid=([^&\"\s]+)", r.url)
     if not m:
         raise ApronUnavailable("portal did not return a job id")
-    return s, m.group(1).replace("%3A", ":")
+    reqid = m.group(1).replace("%3A", ":")
+    return s, reqid
 
 
-def poll(session, reqid, outdir, timeout_s=5400, interval_s=30, log=print):
+def poll(session, reqid, outdir, timeout_s=5400, interval_s=30, max_transient=5,
+         log=print):
     os.makedirs(outdir, exist_ok=True)
     deadline = time.time() + timeout_s
+    transient = 0
     while time.time() < deadline:
-        r = session.get(RESULTS, params={"reqid": reqid}, timeout=120)
+        # A network failure mid-poll must surface as ApronUnavailable so the
+        # caller can fall back, not escape as a raw requests exception. The
+        # portal can also blip, so tolerate a few consecutive failures first.
+        try:
+            r = session.get(RESULTS, params={"reqid": reqid}, timeout=120)
+        except Exception as e:  # noqa: BLE001 - any transport error
+            transient += 1
+            if transient > max_transient:
+                raise ApronUnavailable(
+                    f"lost contact with the GPP portal while waiting for job "
+                    f"{reqid} ({e})")
+            log(f"[apron] portal unreachable ({transient}/{max_transient}), retrying ...")
+            time.sleep(interval_s)
+            continue
+        transient = 0
+        # Exclude only the portal's own documentation/example downloads, by
+        # their actual names. A bare "sample" substring test would also throw
+        # away real results whenever a user names an arm "sample_1".
         links = [l for l in sorted(set(re.findall(r'href="([^"]*download[^"]*\.txt[^"]*)"', r.text)))
-                 if "README" not in l and "sample" not in l]
+                 if "README" not in l and "crispr_gene_scoring_sample" not in l]
         if links:
             saved = []
             for l in links:
                 u = l if l.startswith("http") else BASE + l
                 fn = re.search(r"filename=([^&]+)", u)
                 fn = fn.group(1) if fn else os.path.basename(u.split("?")[0])
-                g = session.get(u, timeout=600)
+                try:
+                    g = session.get(u, timeout=600)
+                except Exception as e:  # noqa: BLE001
+                    raise ApronUnavailable(f"could not download {fn} ({e})")
                 if g.ok and len(g.content) > 100:
                     path = os.path.join(outdir, fn)
                     open(path, "wb").write(g.content)
                     saved.append(path)
+            if not saved:
+                raise ApronUnavailable("portal returned result links but no usable files")
             return saved
         log(f"[apron] job {reqid} processing ...")
         time.sleep(interval_s)

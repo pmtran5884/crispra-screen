@@ -24,7 +24,8 @@ PRIMER_3P = "CTTGTGGAAAGGACGAAACACCG"  # full px52 genome-annealing part
 SCAFFOLD = "GTTTAAGAGCTATGCTG"         # tracrRNA, immediately 3' of the sgRNA
 STAGGERS = {0: "px52_F1", 1: "px52_F2", 2: "px52_F3", 3: "px52_F4"}
 SG_LEN = 20
-SCAN_WINDOW = 40                        # anchor must start within the first 40 nt
+SCAN_WINDOW = 40                        # legacy default: anchor within the first 40 nt
+AUTO_WINDOW_SAMPLE = 20_000             # reads inspected when auto-sizing the window
 
 FATE_LABELS = {
     "mapped_scaffold_ok": "on-structure amplicon, guide in key",
@@ -66,6 +67,36 @@ def load_bundled_mock_counts() -> pd.DataFrame:
 
 
 # ---- FASTQ counting ---------------------------------------------------------
+def choose_scan_window(path: str, sample: int = AUTO_WINDOW_SAMPLE,
+                       floor: int = SCAN_WINDOW, pad: int = 12) -> tuple[int, dict]:
+    """Pick a scan window wide enough for where the anchor actually falls.
+
+    Libraries differ in how much 5' adapter survives in read 1: if the full P5
+    adapter is retained the anchor starts around position 39, well past the
+    legacy 40 nt window, and a fixed window would silently reject almost every
+    read. This samples the head of the file and sizes the window from the
+    observed anchor positions.
+    """
+    pos = []
+    n = 0
+    for seq in fastq_seqs(path):
+        n += 1
+        p = seq.find(ANCHOR)
+        if p >= 0:
+            pos.append(p)
+        if n >= sample:
+            break
+    if not pos:
+        return floor, {"reads_sampled": n, "anchor_found": 0, "window": floor}
+    pos_sorted = sorted(pos)
+    # 99th percentile keeps pathological concatenated reads from inflating it
+    p99 = pos_sorted[min(len(pos_sorted) - 1, int(0.99 * len(pos_sorted)))]
+    window = max(floor, p99 + len(ANCHOR) + pad)
+    return window, {"reads_sampled": n, "anchor_found": len(pos),
+                    "median_anchor_pos": pos_sorted[len(pos_sorted) // 2],
+                    "p99_anchor_pos": p99, "window": window}
+
+
 def fastq_seqs(path: str):
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt") as fh:
@@ -75,11 +106,22 @@ def fastq_seqs(path: str):
 
 
 def count_fastq(path: str, key_index: dict[str, int], n_guides: int,
-                progress_every: int = 2_000_000, log=print):
+                progress_every: int = 2_000_000, log=print, scan_window: int = 0):
     """Count sgRNAs in one R1 FASTQ against a key index.
+
+    scan_window: how far into the read the U6 anchor may start. 0 (default)
+    sizes it automatically from the data; pass an integer to force it.
 
     Returns (counts ndarray aligned to key order, qc dict, unmatched Counter).
     """
+    if scan_window and scan_window > 0:
+        window, wmeta = int(scan_window), {"window": int(scan_window), "mode": "forced"}
+    else:
+        window, wmeta = choose_scan_window(path)
+        wmeta["mode"] = "auto"
+        if log and window != SCAN_WINDOW:
+            log(f"  anchor search window set to {window} nt "
+                f"(median anchor position {wmeta.get('median_anchor_pos')})")
     fate = collections.Counter()
     stagger = collections.Counter()
     counts = np.zeros(n_guides, dtype=np.int64)
@@ -89,7 +131,7 @@ def count_fastq(path: str, key_index: dict[str, int], n_guides: int,
     for seq in fastq_seqs(path):
         n += 1
         lens[len(seq)] += 1
-        p = seq.find(ANCHOR, 0, SCAN_WINDOW)
+        p = seq.find(ANCHOR, 0, window)
         if p < 0:
             fate["no_anchor_scaffold_present" if SCAFFOLD[:12] in seq
                  else "no_anchor_no_scaffold"] += 1
@@ -120,6 +162,7 @@ def count_fastq(path: str, key_index: dict[str, int], n_guides: int,
         "distinct_guides_detected": int((counts > 0).sum()),
         "unmatched_20mers_distinct": len(unmatched),
         "unmatched_top": unmatched.most_common(50),
+        "scan_window": wmeta,
     }
     return counts, qc, unmatched
 

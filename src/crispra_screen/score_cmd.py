@@ -15,9 +15,10 @@ from .core import (count_fastq, load_bundled_mock_counts, load_key, lognorm,
                    score_screen)
 
 
-def _counts_for(key, key_index, fastq, name, log):
+def _counts_for(key, key_index, fastq, name, log, scan_window=0):
     log(f"[score] counting {name} from {os.path.basename(fastq)} ...")
-    counts, qc, _ = count_fastq(fastq, key_index, len(key), log=log)
+    counts, qc, _ = count_fastq(fastq, key_index, len(key), log=log,
+                                scan_window=scan_window)
     log(f"[score]   {qc['total_reads']:,} reads, {qc['mapped_reads']:,} mapped")
     return counts
 
@@ -25,19 +26,21 @@ def _counts_for(key, key_index, fastq, name, log):
 def run_score(treatment, outdir, mock=None, use_bundled_mock=False, key_path=None,
               method="local", treat_name="treatment", font="Arial", font_size=10.0,
               n_pos=3, n_neg=3, bare=True, dot_scale=2.0,
-              width_mm=210.0, height_mm=130.0, log=print):
+              width_mm=210.0, height_mm=130.0, scan_window=0, log=print):
     os.makedirs(outdir, exist_ok=True)
     key = load_key(key_path)
     key_index = {g: i for i, g in enumerate(key["Guide_Seq"])}
 
-    treat_counts = _counts_for(key, key_index, treatment, treat_name, log)
+    treat_counts = _counts_for(key, key_index, treatment, treat_name, log,
+                               scan_window=scan_window)
 
     if use_bundled_mock:
         log("[score] using the bundled Mock reference counts")
         ref = load_bundled_mock_counts().set_index("Guide_Seq")["count"]
         mock_counts = ref.reindex(key["Guide_Seq"]).fillna(0).values.astype(np.int64)
     elif mock:
-        mock_counts = _counts_for(key, key_index, mock, "mock", log)
+        mock_counts = _counts_for(key, key_index, mock, "mock", log,
+                                  scan_window=scan_window)
     else:
         raise ValueError("provide --mock FASTQ or --use-bundled-mock")
 
@@ -55,11 +58,12 @@ def run_score(treatment, outdir, mock=None, use_bundled_mock=False, key_path=Non
         log("[score] submitting to the GPP portal (Apron) ...")
         try:
             session, reqid = A.submit(chip_path, data_path, meta)
+            log(f"[score] portal job id: {reqid}")
             saved = A.poll(session, reqid, outdir, log=log)
             arm_file = [p for p in saved if treat_name in os.path.basename(p)] or saved
             res = A.parse_output(arm_file[0])
             res.to_csv(os.path.join(outdir, f"apron_gene_scores_{treat_name}.csv"))
-        except A.ApronUnavailable as e:
+        except (A.ApronUnavailable, OSError) as e:
             log(f"[score] Apron unavailable ({e}); falling back to the local scorer")
             res = score_screen(key, treat_counts, mock_counts, treat_name=treat_name)
             res.to_csv(os.path.join(outdir, f"gene_scores_{treat_name}.csv"))

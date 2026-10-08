@@ -21,13 +21,14 @@ from .depth import subsample_curve
 
 
 def run_qc(fastq, outdir, key_path=None, sample_name="library",
-           font="Arial", font_size=10.0, n_missing=10, log=print):
+           font="Arial", font_size=10.0, n_missing=10, scan_window=0, log=print):
     os.makedirs(outdir, exist_ok=True)
     key = load_key(key_path)
     key_index = {g: i for i, g in enumerate(key["Guide_Seq"])}
 
     log(f"[qc] counting {sample_name} from {os.path.basename(fastq)} ...")
-    counts, qc, unmatched = count_fastq(fastq, key_index, len(key), log=log)
+    counts, qc, unmatched = count_fastq(fastq, key_index, len(key), log=log,
+                                       scan_window=scan_window)
     tot = qc["total_reads"]
     log(f"[qc] {tot:,} reads, {qc['mapped_reads']:,} mapped "
         f"({qc['mapped_reads']/tot:.1%}), {qc['distinct_guides_detected']:,} guides")
@@ -37,7 +38,8 @@ def run_qc(fastq, outdir, key_path=None, sample_name="library",
             "reads_assigned_to_key": qc["mapped_reads"],
             "reads_assigned_pct": round(qc["mapped_reads"] / tot * 100, 3),
             "distinct_guides_detected": qc["distinct_guides_detected"],
-            "guides_in_key": len(key)}
+            "guides_in_key": len(key),
+            "anchor_scan_window": qc["scan_window"]["window"]}
     for k, lab in FATE_LABELS.items():
         summ[f"{lab} (n)"] = qc["fate"].get(k, 0)
         summ[f"{lab} (%)"] = round(qc["fate"].get(k, 0) / tot * 100, 3)

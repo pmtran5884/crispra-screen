@@ -21,6 +21,10 @@ def main(argv=None):
     q.add_argument("--outdir", default="qc_out")
     q.add_argument("--n-missing", type=int, default=10,
                    help="max genes with 0/1 guide to table in the report")
+    q.add_argument("--scan-window", type=int, default=0,
+                   help="how far into read 1 the U6 anchor may start; "
+                        "0 (default) sizes it from the data, which handles "
+                        "libraries that retain the full 5' adapter")
     q.add_argument("--font", default="Arial")
     q.add_argument("--font-size", type=float, default=10.0)
 
@@ -42,6 +46,10 @@ def main(argv=None):
     s.add_argument("--n-label-neg", type=int, default=3)
     s.add_argument("--width-mm", type=float, default=210.0)
     s.add_argument("--height-mm", type=float, default=130.0)
+    s.add_argument("--scan-window", type=int, default=0,
+                   help="how far into read 1 the U6 anchor may start; "
+                        "0 (default) sizes it from the data, which handles "
+                        "libraries that retain the full 5' adapter")
     s.add_argument("--font", default="Arial")
     s.add_argument("--font-size", type=float, default=10.0)
 
@@ -49,14 +57,16 @@ def main(argv=None):
     if a.cmd == "qc":
         from .qc import run_qc
         run_qc(a.fastq, a.outdir, key_path=a.key, sample_name=a.name,
-               font=a.font, font_size=a.font_size, n_missing=a.n_missing)
+               font=a.font, font_size=a.font_size, n_missing=a.n_missing,
+               scan_window=a.scan_window)
     elif a.cmd == "score":
         from .score_cmd import run_score
         run_score(a.treatment, a.outdir, mock=a.mock, use_bundled_mock=a.use_bundled_mock,
                   key_path=a.key, method=a.method, treat_name=a.name,
                   font=a.font, font_size=a.font_size, n_pos=a.n_label_pos,
                   n_neg=a.n_label_neg, bare=not a.decorated, dot_scale=a.dot_scale,
-                  width_mm=a.width_mm, height_mm=a.height_mm)
+                  width_mm=a.width_mm, height_mm=a.height_mm,
+                  scan_window=a.scan_window)
     return 0
 
 
