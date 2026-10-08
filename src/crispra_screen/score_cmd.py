@@ -26,7 +26,8 @@ def _counts_for(key, key_index, fastq, name, log, scan_window=0):
 def run_score(treatment, outdir, mock=None, use_bundled_mock=False, key_path=None,
               method="local", treat_name="treatment", font="Arial", font_size=10.0,
               n_pos=3, n_neg=3, bare=True, dot_scale=2.0,
-              width_mm=210.0, height_mm=130.0, scan_window=0, log=print):
+              width_mm=210.0, height_mm=130.0, scan_window=0,
+              label_style="column", log=print):
     os.makedirs(outdir, exist_ok=True)
     key = load_key(key_path)
     key_index = {g: i for i, g in enumerate(key["Guide_Seq"])}
@@ -76,7 +77,8 @@ def run_score(treatment, outdir, mock=None, use_bundled_mock=False, key_path=Non
 
     F.volcano(res, title, stem, fdr_cut=0.1, n_pos=n_pos, n_neg=n_neg, bare=bare,
               dot_scale=dot_scale, width_mm=width_mm, height_mm=height_mm,
-              font=font, font_size=font_size, score_col=score_col)
+              font=font, font_size=font_size, score_col=score_col,
+              label_style=label_style)
     top = res[(res.direction == "enriched") & (~res.is_control)].nsmallest(5, "p_value")
     log("[score] top enriched genes:")
     for g, r in top.iterrows():

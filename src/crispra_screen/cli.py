@@ -42,6 +42,10 @@ def main(argv=None):
     s.add_argument("--decorated", action="store_true",
                    help="keep legend/axis-titles/title on the volcano (default: bare)")
     s.add_argument("--dot-scale", type=float, default=2.0)
+    s.add_argument("--label-style", choices=["column", "near"], default="column",
+                   help="column: labels pinned to the axis edges, evenly spaced "
+                        "(survives shrinking into a figure panel). near: labels "
+                        "beside their own points (better on a slide)")
     s.add_argument("--n-label-pos", type=int, default=3)
     s.add_argument("--n-label-neg", type=int, default=3)
     s.add_argument("--width-mm", type=float, default=210.0)
@@ -66,7 +70,7 @@ def main(argv=None):
                   font=a.font, font_size=a.font_size, n_pos=a.n_label_pos,
                   n_neg=a.n_label_neg, bare=not a.decorated, dot_scale=a.dot_scale,
                   width_mm=a.width_mm, height_mm=a.height_mm,
-                  scan_window=a.scan_window)
+                  scan_window=a.scan_window, label_style=a.label_style)
     return 0
 
 

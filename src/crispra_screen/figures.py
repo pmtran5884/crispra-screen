@@ -7,6 +7,7 @@ layout and every element stays editable in Illustrator.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.transforms import Bbox
@@ -39,6 +40,25 @@ def save(fig, stem, formats, width_mm=None, height_mm=None):
             fig.savefig(f"{stem}.{ext}", dpi=300, bbox_inches="tight")
 
 
+def _near(items, x_off, y_span, min_gap_frac=0.075):
+    """Place each label just beside its own point, pushing labels apart only as
+    far as needed to stop them colliding. Keeps the label-to-point association
+    obvious on a slide, where long leader lines read as clutter. Contrast with
+    _spread(), which pins labels to the axis edge so they survive heavy
+    downscaling in a multi-panel figure."""
+    items = sorted(items, key=lambda t: t[2])
+    gap = min_gap_frac * y_span
+    ys = []
+    for _, _, gy, _ in items:
+        y = gy if not ys else max(gy, ys[-1] + gap)
+        ys.append(y)
+    # if the stack drifted upward, pull it back down toward the points
+    drift = ys[-1] - max(i[2] for i in items)
+    if drift > 0:
+        ys = [y - drift / 2 for y in ys]
+    return [(it, it[1] + x_off, y) for it, y in zip(items, ys)]
+
+
 def _spread(items, x_col, y_lo, y_hi):
     items = sorted(items, key=lambda t: t[2])
     n = len(items)
@@ -50,13 +70,20 @@ def _spread(items, x_col, y_lo, y_hi):
 def volcano(res, title, stem, formats=("png", "pdf", "svg"), fdr_cut=0.1,
             n_pos=3, n_neg=3, bare=False, dot_scale=2.0,
             width_mm=210.0, height_mm=130.0, font="Arial", font_size=10.0,
-            score_col="score", label_span=(0.42, 0.97)):
+            score_col="score", label_span=(0.42, 0.97), label_style="column",
+            extra_labels=(),
+            xlabel="mean sgRNA log$_2$ fold change vs Mock",
+            ylabel="average $-$log$_{10}$ $P$"):
     """One-arm volcano from a gene-score table (local or Apron-derived).
 
     `res` needs columns: mean_lfc, <score_col>, direction, fdr, is_control.
     bare=True drops legend/axis-titles/title (tick labels kept). Labels: the
-    top n_pos/n_neg genes by score within each fold-change sign, spread evenly
-    down each side so they stay apart when the figure is scaled down.
+    top n_pos/n_neg genes by score within each fold-change sign.
+
+    label_style='column' pins labels to the axis edges, evenly spaced, so they
+    stay legible when the figure is shrunk into a multi-panel layout.
+    label_style='near' puts each label beside its own point - the right choice
+    for a presentation slide, where long leaders are distracting.
     """
     style(font, font_size)
     fig, ax = plt.subplots(figsize=(width_mm / MM, height_mm / MM), layout="constrained")
@@ -83,6 +110,15 @@ def volcano(res, title, stem, formats=("png", "pdf", "svg"), fdr_cut=0.1,
     real = res[~res.is_control]
     pos = real[real.mean_lfc > 0].nlargest(n_pos, score_col)
     neg = real[real.mean_lfc < 0].nlargest(n_neg, score_col)
+    # genes the caller always wants named, whatever their rank (e.g. an
+    # expected positive control, or a suspected artefact)
+    forced = [g for g in extra_labels if g in real.index]
+    if forced:
+        f = real.loc[forced]
+        pos = pd.concat([pos, f[f.mean_lfc > 0]])
+        pos = pos[~pos.index.duplicated()]
+        neg = pd.concat([neg, f[f.mean_lfc <= 0]])
+        neg = neg[~neg.index.duplicated()]
     ax.margins(0.08)
     x0, x1 = ax.get_xlim()
     ax.set_xlim(x0 - 0.10 * (x1 - x0), x1 + 0.16 * (x1 - x0))
@@ -96,19 +132,26 @@ def volcano(res, title, stem, formats=("png", "pdf", "svg"), fdr_cut=0.1,
         items = [(g, r.mean_lfc, r[score_col], r.fdr) for g, r in sub.iterrows()]
         if not items:
             continue
-        xc = (x1 - 0.015 * (x1 - x0)) if side == "right" else (x0 + 0.015 * (x1 - x0))
-        placed += [(it, c, yy, side) for it, c, yy in _spread(items, xc, lo, hi)]
+        if label_style == "near":
+            x_off = 0.022 * (x1 - x0) * (1 if side == "right" else -1)
+            placed += [(it, c, yy, "left" if side == "right" else "right")
+                       for it, c, yy in _near(items, x_off, y1 - y0)]
+        else:
+            xc = (x1 - 0.015 * (x1 - x0)) if side == "right" else (x0 + 0.015 * (x1 - x0))
+            placed += [(it, c, yy, side) for it, c, yy in _spread(items, xc, lo, hi)]
     for (g, gx, gy, fdr), xc, yy, side in placed:
         col = ("#444444" if fdr >= fdr_cut
                else (RED if res.loc[g, "direction"] == "enriched" else BLUE))
+        moved = abs(yy - gy) > 0.012 * (y1 - y0)
         ax.annotate(g, (gx, gy), xytext=(xc, yy), textcoords="data", va="center",
                     ha="right" if side == "right" else "left",
                     color=col,
-                    arrowprops=dict(arrowstyle="-", lw=0.4, color="#b0b0b0",
-                                    shrinkA=0, shrinkB=3))
+                    arrowprops=(dict(arrowstyle="-", lw=0.4, color="#b0b0b0",
+                                     shrinkA=0, shrinkB=3)
+                                if (moved or label_style != "near") else None))
     if not bare:
-        ax.set_xlabel("mean sgRNA log$_2$ fold change vs Mock")
-        ax.set_ylabel("average $-$log$_{10}$ $P$")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
         ax.set_title(title, loc="left")
         ax.legend(frameon=False, loc="upper left", handletextpad=0.4,
                   borderpad=0.2, labelspacing=0.4)
