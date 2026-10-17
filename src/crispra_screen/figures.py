@@ -239,3 +239,66 @@ def panel_saturation(ax, depth_df, sample):
     ax.set_xlabel("sequenced reads (millions)")
     ax.set_ylabel("sgRNAs detected")
     ax.set_title("Detection saturation (subsampling)", loc="left")
+
+
+# --------------------------------------------------------------------------
+# shallow-run depth diagnostics
+# --------------------------------------------------------------------------
+
+def panel_rarefaction(ax, rare, rep):
+    """sgRNAs recovered vs reads, against the Chao1 asymptote."""
+    for _, g in rare.groupby("rep"):
+        ax.plot(g.reads, g.guides, "-", color=GREY, alpha=0.35, lw=0.8)
+    a = rare.groupby("frac").mean(numeric_only=True)
+    ax.plot(a.reads, a.guides, "o-", ms=3, lw=1.4, color=BLUE, zorder=3,
+            label="sgRNAs recovered")
+    ax.axhline(rep["chao1_estimate"], ls="--", lw=1.2, color=RED,
+               label=f"Chao1 estimate ({rep['chao1_estimate']:.0f})")
+    ax.set_xlabel("mapped reads sampled")
+    ax.set_ylabel("distinct sgRNAs recovered")
+    ax.set_ylim(top=rep["chao1_estimate"] * 1.28)
+    ax.legend(frameon=False, loc="lower right")
+    ax.set_title(f"Richness — {rep['pct_of_estimated_recovered']:.0f}% recovered "
+                 f"({rep['verdict']})", loc="left")
+
+
+def panel_singletons(ax, rare):
+    """Singletons rise while material remains, then fall once it is exhausted."""
+    a = rare.groupby("frac").mean(numeric_only=True)
+    ax.plot(a.reads, a.singletons, "o-", ms=3, lw=1.4, color=BLUE)
+    ax.set_xlabel("mapped reads sampled")
+    ax.set_ylabel("sgRNAs seen exactly once")
+    peak = a.singletons.idxmax()
+    ax.set_title("Singletons " + ("still accumulating" if peak == a.index.max()
+                                  else "past their peak"), loc="left")
+
+
+def panel_power(ax, power, saturated=False):
+    """Detectable binder abundance at this depth, and at hypothetical depths."""
+    for m, g in power.groupby("depth_multiplier"):
+        col = RED if m == 1 else BLUE
+        lab = (f"current depth ({int(g.reads.iloc[0]):,} reads)" if m == 1
+               else f"{m}x deeper ({int(g.reads.iloc[0]):,} reads)")
+        ax.plot(g.gene_freq * 100, g.p_detected * 100, lw=1.6,
+                color=col, ls="-" if m == 1 else (0, (4, 2)), label=lab)
+    ax.axhline(90, ls="--", lw=1.0, color=GREY)
+    ax.set_xscale("log"); ax.set_ylim(0, 108)
+    ax.set_xlabel("true binder, % of sorted cells")
+    ax.set_ylabel("P(enough sgRNAs seen), %")
+    ax.legend(frameon=False, loc="lower right")
+    ax.set_title("Detection power" + (" — deeper curve unreachable while saturated"
+                                      if saturated else ""), loc="left")
+
+
+def panel_hit_stability(ax, stab, fdr_cut=0.1):
+    """FDR of the leading calls as depth is reduced; flat means read-limited is false."""
+    a = stab.groupby(["gene", "frac"]).mean(numeric_only=True).reset_index()
+    floor = 1e-6
+    for i, (g, s) in enumerate(a.groupby("gene")):
+        ax.plot(s.reads, np.maximum(s.fdr, floor), "o-", ms=3, lw=1.4,
+                color=[RED, BLUE, ORANGE, DARK, GREY][i % 5], label=g)
+    ax.axhline(fdr_cut, ls="--", lw=1.0, color=GREY)
+    ax.set_yscale("log")
+    ax.set_xlabel("mapped reads sampled"); ax.set_ylabel("FDR")
+    ax.legend(frameon=False, loc="best", fontsize="small")
+    ax.set_title("Call stability vs depth", loc="left")

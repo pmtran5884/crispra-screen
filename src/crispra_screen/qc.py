@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import textwrap
 
 import numpy as np
 import pandas as pd
@@ -17,12 +18,14 @@ import matplotlib.pyplot as plt
 
 from . import figures as F
 from .core import FATE_LABELS, count_fastq, load_key
-from .depth import subsample_curve
+from .depth import (SHALLOW_READS, detection_power, rarefaction,
+                    saturation_report, subsample_curve)
 
 
 def run_qc(fastq, outdir, key_path=None, sample_name="library",
            font="Arial", font_size=10.0, n_missing=10, scan_window=0,
-           both_strands=True, log=print):
+           both_strands=True, depth_check="auto",
+           depth_threshold=SHALLOW_READS, log=print):
     os.makedirs(outdir, exist_ok=True)
     key = load_key(key_path)
     key_index = {g: i for i, g in enumerate(key["Guide_Seq"])}
@@ -71,6 +74,29 @@ def run_qc(fastq, outdir, key_path=None, sample_name="library",
     depth = subsample_curve(counts)
     depth.to_csv(os.path.join(outdir, "qc_depth_subsampling.csv"), index=False)
 
+    # ---- shallow-run diagnostics: is another lane worth paying for? ----
+    shallow = (depth_check == "always" or
+               (depth_check == "auto" and tot < depth_threshold))
+    rep = rare = power = None
+    if shallow and qc["mapped_reads"] > 0:
+        log(f"[qc] {tot:,} reads (< {depth_threshold:,}): adding saturation "
+            "and detection-power diagnostics ...")
+        rare = rarefaction(counts)
+        rep = saturation_report(counts, rare)
+        gpg = int(np.median(key.groupby("Gene").size())) or 4
+        power = detection_power(qc["mapped_reads"], guides_per_gene=gpg)
+        rare.to_csv(os.path.join(outdir, "qc_rarefaction.csv"), index=False)
+        power.to_csv(os.path.join(outdir, "qc_detection_power.csv"), index=False)
+        pd.DataFrame([rep]).to_csv(os.path.join(outdir, "qc_saturation.csv"), index=False)
+        log(f"[qc] richness {rep['guides_observed']:,} observed / "
+            f"{rep['chao1_estimate']:,.0f} estimated "
+            f"({rep['pct_of_estimated_recovered']:.0f}%) — {rep['verdict']}")
+        log(f"[qc] {rep['advice']}")
+        at90 = power[(power.depth_multiplier == 1) & (power.p_detected >= 0.9)]
+        if len(at90):
+            log(f"[qc] 90% detection down to {at90.gene_freq.min()*100:.2g}% "
+                "of sorted cells at this depth")
+
     # ---- multi-page PDF report ----
     F.style(font, font_size)
     pdf_path = os.path.join(outdir, "qc_report.pdf")
@@ -90,6 +116,17 @@ def run_qc(fastq, outdir, key_path=None, sample_name="library",
             f"Genes with 0 detected guides: {int((per.n_guides_detected==0).sum()):,}",
             f"Genes with exactly 1 detected guide: {int((per.n_guides_detected==1).sum()):,}",
         ]
+        if rep is not None:
+            lines += [
+                "",
+                f"Richness (Chao1): {rep['guides_observed']:,} of "
+                f"{rep['chao1_estimate']:,.0f} estimated "
+                f"({rep['pct_of_estimated_recovered']:.0f}%) — {rep['verdict'].upper()}",
+                f"Marginal yield: {rep['new_guides_per_1k_extra_reads']:,.1f} new "
+                f"sgRNAs per 1,000 extra reads "
+                f"({rep['reads_per_observed_guide']:,.1f} reads per sgRNA)",
+            ]
+            lines += ["  " + s for s in textwrap.wrap(rep["advice"], 92)]
         for i, ln in enumerate(lines):
             fig.text(0.09, 0.89 - i * 0.028, ln, fontsize=10)
         # missing-guide table
@@ -122,5 +159,23 @@ def run_qc(fastq, outdir, key_path=None, sample_name="library",
         F.panel_saturation(axes[1], depth, "library")
         fig.tight_layout(); pdf.savefig(fig); plt.close(fig)
 
+        # page 4 (shallow runs only): is another lane worth paying for?
+        if rep is not None:
+            fig, axes = plt.subplots(2, 2, figsize=(8.27, 7.6))
+            F.panel_rarefaction(axes[0, 0], rare, rep)
+            F.panel_singletons(axes[0, 1], rare)
+            F.panel_power(axes[1, 0], power, saturated=rep["verdict"] == "saturated")
+            axes[1, 1].axis("off")
+            axes[1, 1].text(0, 1, "Verdict\n\n" + "\n".join(textwrap.wrap(
+                rep["advice"], 44)) + "\n\n" + "\n".join(
+                f"{k.replace('_', ' ')}: {v:,}" if isinstance(v, (int, float))
+                else f"{k.replace('_', ' ')}: {v}"
+                for k, v in rep.items() if k != "advice"),
+                va="top", ha="left", fontsize=8.5, transform=axes[1, 1].transAxes)
+            fig.suptitle(f"Is deeper sequencing worth it? — {sample_name}",
+                         x=0.02, ha="left")
+            fig.tight_layout(); pdf.savefig(fig); plt.close(fig)
+
     log(f"[qc] wrote {pdf_path} and qc_*.csv in {outdir}")
-    return {"qc": qc, "report": pdf_path, "missing": missing, "depth": depth}
+    return {"qc": qc, "report": pdf_path, "missing": missing, "depth": depth,
+            "saturation": rep, "rarefaction": rare, "power": power}

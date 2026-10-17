@@ -28,6 +28,12 @@ def main(argv=None):
     q.add_argument("--forward-only", dest="both_strands", action="store_false",
                    help="do not retry the reverse complement when the anchor is "
                         "absent; use for single-orientation runs")
+    q.add_argument("--depth-check", choices=["auto", "on", "off"], default="auto",
+                   help="run the shallow-run depth diagnostics (saturation, "
+                        "detection power). auto (default) runs them "
+                        "only when the FASTQ has fewer than --depth-threshold reads")
+    q.add_argument("--depth-threshold", type=int, default=100_000,
+                   help="read count below which --depth-check auto fires")
     q.add_argument("--font", default="Arial")
     q.add_argument("--font-size", type=float, default=10.0)
 
@@ -60,6 +66,14 @@ def main(argv=None):
     s.add_argument("--forward-only", dest="both_strands", action="store_false",
                    help="do not retry the reverse complement when the anchor is "
                         "absent; use for single-orientation runs")
+    s.add_argument("--depth-check", choices=["auto", "on", "off"], default="auto",
+                   help="run the shallow-run depth diagnostics (saturation, "
+                        "detection power, call stability). auto (default) runs them "
+                        "only when the FASTQ has fewer than --depth-threshold reads")
+    s.add_argument("--depth-threshold", type=int, default=100_000,
+                   help="read count below which --depth-check auto fires")
+    s.add_argument("--n-stability-genes", type=int, default=3,
+                   help="how many top enriched genes to re-score across depth")
     s.add_argument("--font", default="Arial")
     s.add_argument("--font-size", type=float, default=10.0)
 
@@ -68,7 +82,9 @@ def main(argv=None):
         from .qc import run_qc
         run_qc(a.fastq, a.outdir, key_path=a.key, sample_name=a.name,
                font=a.font, font_size=a.font_size, n_missing=a.n_missing,
-               scan_window=a.scan_window, both_strands=a.both_strands)
+               scan_window=a.scan_window, both_strands=a.both_strands,
+               depth_check={"on": "always"}.get(a.depth_check, a.depth_check),
+               depth_threshold=a.depth_threshold)
     elif a.cmd == "score":
         from .score_cmd import run_score
         run_score(a.treatment, a.outdir, mock=a.mock, use_bundled_mock=a.use_bundled_mock,
@@ -77,7 +93,10 @@ def main(argv=None):
                   n_neg=a.n_label_neg, bare=not a.decorated, dot_scale=a.dot_scale,
                   width_mm=a.width_mm, height_mm=a.height_mm,
                   scan_window=a.scan_window, label_style=a.label_style,
-                  both_strands=a.both_strands)
+                  both_strands=a.both_strands,
+                  depth_check={"on": "always"}.get(a.depth_check, a.depth_check),
+                  depth_threshold=a.depth_threshold,
+                  n_stability_genes=a.n_stability_genes)
     return 0
 
 

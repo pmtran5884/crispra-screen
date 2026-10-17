@@ -74,11 +74,14 @@ and `Gene` columns).
 
 | output | contents |
 | --- | --- |
-| `qc_report.pdf` | 3-page report: read fate, primer usage, reads-per-sgRNA histogram, library skew, within-gene guide evenness, depth-subsampling saturation, and a table of up to 10 genes with no or only one detected guide |
+| `qc_report.pdf` | report: read fate, primer usage, reads-per-sgRNA histogram, library skew, within-gene guide evenness, depth-subsampling saturation, and a table of up to 10 genes with no or only one detected guide. Shallow runs get a 4th page answering *is deeper sequencing worth it?* |
 | `qc_read_summary.csv` | every percentage in the report as one tidy row |
 | `qc_guide_counts.csv` | reads per sgRNA |
 | `qc_missing_guide_genes.csv` | every gene with ≤ 1 detected guide |
 | `qc_depth_subsampling.csv` | guides detected and count correlation vs sequencing depth |
+| `qc_saturation.csv` | shallow runs only: observed vs Chao1 richness, marginal yield, verdict |
+| `qc_rarefaction.csv` | shallow runs only: sgRNAs, singletons and Chao1 at each subsampled depth |
+| `qc_detection_power.csv` | shallow runs only: P(detect) vs a binder's abundance in the sorted bin |
 
 **What the read-fate numbers mean.** Reads are anchored on the constant U6
 sequence `GGAAAGGACGAAACACCG` within the first 40 nt (not at a fixed offset,
@@ -114,6 +117,33 @@ hypergeometric probability mass `P(X = i)`, and the gene score is the mean
 `-log10(p_i)`. Both directions are scored and the more significant kept.
 Benjamini–Hochberg FDR is added per direction (the GPP hypergeometric output
 itself carries no multiple-testing correction).
+
+### Is deeper sequencing worth it?
+
+A sorted bin is not a library: it can hold a few hundred constructs, and past
+that point another lane buys nothing. When the FASTQ has fewer than 100,000
+reads (`--depth-threshold`), `qc` and `score` answer the question without being
+asked — `--depth-check on|off` forces or suppresses it. Three separate things
+are reported, because a run can be saturated *and* underpowered:
+
+- **Richness.** Observed sgRNAs against the bias-corrected Chao1 estimate, plus
+  the marginal yield in new sgRNAs per 1,000 extra reads. Singletons that have
+  peaked and are falling mean the material is exhausted.
+- **Detection power.** How abundant a true binder must be in the sorted bin for
+  at least 2 of its sgRNAs to draw a read. The hypothetical deeper curve is
+  flagged as unreachable when the sample is saturated — extra reads would
+  resample the same exhausted material.
+- **Call stability.** The top enriched genes re-scored at 10–100% of reads.
+  What matters is whether the *call* changes, not whether the FDR number moves:
+  an FDR that is flat across a 10x span is limited by the rank statistic over
+  that gene's sgRNA fold changes, and no amount of extra sequencing will move
+  it. A gene that only clears the threshold at full depth is the one case where
+  more reads genuinely help.
+
+The practical upshot is usually one of two: *sequence deeper* (constructs
+remain unsampled), or *sort more cells* (the reads have already read out
+everything the sort delivered). Written to `depth_saturation_*.csv`,
+`depth_hit_stability_*.csv` and `depth_check_*.{pdf,svg,png}`.
 
 Outputs: the full per-gene table (CSV) and the volcano as **PDF + SVG + PNG**,
 210 × 130 mm at Arial 10 with no raster elements, so every point and label stays
