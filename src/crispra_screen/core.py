@@ -27,6 +27,12 @@ SG_LEN = 20
 SCAN_WINDOW = 40                        # legacy default: anchor within the first 40 nt
 AUTO_WINDOW_SAMPLE = 20_000             # reads inspected when auto-sizing the window
 
+def revcomp(seq: str) -> str:
+    return seq.translate(_RC)[::-1]
+
+
+_RC = str.maketrans("ACGTNacgtn", "TGCANtgcan")
+
 FATE_LABELS = {
     "mapped_scaffold_ok": "on-structure amplicon, guide in key",
     "mapped_scaffold_bad": "guide in key, scaffold mismatch",
@@ -82,6 +88,10 @@ def choose_scan_window(path: str, sample: int = AUTO_WINDOW_SAMPLE,
     for seq in fastq_seqs(path):
         n += 1
         p = seq.find(ANCHOR)
+        if p < 0:
+            # some runs mix read orientations; size the window from both so a
+            # reverse-strand read is not rejected for being a few nt deeper
+            p = revcomp(seq).find(ANCHOR)
         if p >= 0:
             pos.append(p)
         if n >= sample:
@@ -106,11 +116,18 @@ def fastq_seqs(path: str):
 
 
 def count_fastq(path: str, key_index: dict[str, int], n_guides: int,
-                progress_every: int = 2_000_000, log=print, scan_window: int = 0):
+                progress_every: int = 2_000_000, log=print, scan_window: int = 0,
+                search_both_strands: bool = True):
     """Count sgRNAs in one R1 FASTQ against a key index.
 
     scan_window: how far into the read the U6 anchor may start. 0 (default)
     sizes it automatically from the data; pass an integer to force it.
+
+    search_both_strands: when the anchor is absent in the read as given, retry
+    on its reverse complement. Long or merged reads are often delivered in
+    mixed orientation, and the reverse-strand half spans the guide just as
+    well; each read is still counted once, so this recovers reads rather than
+    double-counting fragments. Reverse hits are tallied separately in the QC.
 
     Returns (counts ndarray aligned to key order, qc dict, unmatched Counter).
     """
@@ -128,14 +145,23 @@ def count_fastq(path: str, key_index: dict[str, int], n_guides: int,
     unmatched = collections.Counter()
     lens = collections.Counter()
     n = 0
+    n_reverse = 0
     for seq in fastq_seqs(path):
         n += 1
         lens[len(seq)] += 1
         p = seq.find(ANCHOR, 0, window)
+        strand = "+"
+        if p < 0 and search_both_strands:
+            rseq = revcomp(seq)
+            p = rseq.find(ANCHOR, 0, window)
+            if p >= 0:
+                seq, strand = rseq, "-"
         if p < 0:
             fate["no_anchor_scaffold_present" if SCAFFOLD[:12] in seq
                  else "no_anchor_no_scaffold"] += 1
             continue
+        if strand == "-":
+            n_reverse += 1
         off = p - (len(PRIMER_3P) - len(ANCHOR))
         stagger[off if 0 <= off <= 3 else -1] += 1
         s = p + len(ANCHOR)
@@ -163,6 +189,7 @@ def count_fastq(path: str, key_index: dict[str, int], n_guides: int,
         "unmatched_20mers_distinct": len(unmatched),
         "unmatched_top": unmatched.most_common(50),
         "scan_window": wmeta,
+        "reverse_strand_reads": n_reverse,
     }
     return counts, qc, unmatched
 

@@ -15,10 +15,13 @@ from .core import (count_fastq, load_bundled_mock_counts, load_key, lognorm,
                    score_screen)
 
 
-def _counts_for(key, key_index, fastq, name, log, scan_window=0):
+def _counts_for(key, key_index, fastq, name, log, scan_window=0, both_strands=True):
     log(f"[score] counting {name} from {os.path.basename(fastq)} ...")
     counts, qc, _ = count_fastq(fastq, key_index, len(key), log=log,
-                                scan_window=scan_window)
+                                scan_window=scan_window,
+                                search_both_strands=both_strands)
+    if qc.get("reverse_strand_reads"):
+        log(f"[score]   {qc['reverse_strand_reads']:,} reads recovered from the reverse strand")
     log(f"[score]   {qc['total_reads']:,} reads, {qc['mapped_reads']:,} mapped")
     return counts
 
@@ -27,13 +30,13 @@ def run_score(treatment, outdir, mock=None, use_bundled_mock=False, key_path=Non
               method="local", treat_name="treatment", font="Arial", font_size=10.0,
               n_pos=3, n_neg=3, bare=True, dot_scale=2.0,
               width_mm=210.0, height_mm=130.0, scan_window=0,
-              label_style="column", log=print):
+              label_style="column", both_strands=True, log=print):
     os.makedirs(outdir, exist_ok=True)
     key = load_key(key_path)
     key_index = {g: i for i, g in enumerate(key["Guide_Seq"])}
 
     treat_counts = _counts_for(key, key_index, treatment, treat_name, log,
-                               scan_window=scan_window)
+                               scan_window=scan_window, both_strands=both_strands)
 
     if use_bundled_mock:
         log("[score] using the bundled Mock reference counts")
@@ -41,7 +44,7 @@ def run_score(treatment, outdir, mock=None, use_bundled_mock=False, key_path=Non
         mock_counts = ref.reindex(key["Guide_Seq"]).fillna(0).values.astype(np.int64)
     elif mock:
         mock_counts = _counts_for(key, key_index, mock, "mock", log,
-                                  scan_window=scan_window)
+                                  scan_window=scan_window, both_strands=both_strands)
     else:
         raise ValueError("provide --mock FASTQ or --use-bundled-mock")
 
