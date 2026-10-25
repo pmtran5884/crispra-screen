@@ -259,6 +259,56 @@ It builds the library you describe, draws the input pool at your cell budget,
 sorts, sequences and scores — and reports detection probability per enrichment
 level.
 
+### Genes with only 2 or 3 guides: order them
+
+Some surfaceome genes have only 2 or 3 designable guides. They are worth
+ordering, and the reason is not obvious from the score alone.
+
+![Power for genes with few guides]({{artifact:art_0f1a2460-5469-4385-83f2-cd4840a844c3}})
+
+**No guide count is categorically excluded.** The best achievable BH-FDR for a
+gene whose guides land at the very top ranks is 1.7e-03 with 2 guides, 4.2e-05
+with 3 and 1.2e-06 with 4 — all comfortably below 0.1. A 2-guide gene can
+return a significant result.
+
+**Detection at 1,000 sorted cells and 30,000 reads:**
+
+| guides | 100× hit | 300× hit | 1000× hit |
+|---|---|---|---|
+| 2 | 74% | 87% | 91% |
+| 3 | 81% | **99.5%** | 100% |
+| 4 | 94% | 99.5% | 100% |
+| 6 | 100% | 100% | 100% |
+
+**Three guides is essentially four.** At any enrichment at or above 300× — the
+regime of every receptor recovered so far — a 3-guide gene performs
+indistinguishably from a 4-guide gene (99.5% vs 99.5%). Order these without
+hesitation.
+
+**Two guides carries a real but bounded penalty, and it is a representation
+problem rather than a statistical one.** Decomposing the 300× case: 92.8% of
+2-guide genes are scoreable at all, and 93.8% of those are called — so the
+dominant loss is the **~8% of 2-guide genes that fail the `min_guides = 2`
+filter because one of their two guides falls below the reference floor.** At
+the empirical 4.26% zero-read rate, `(1 - 0.0426)^2 = 91.7%` of 2-guide genes
+have both guides represented; the observed rate in the current library is 8.0%
+dropped, against 0.0% for 3-guide and 0.2% for 4-guide genes.
+
+**The cost of keeping them is trivial.** 150 two-guide genes consume 300 of
+~8,150 slots (3.7%). Redeploying those slots across the rest of the library
+would add ~0.3 guides per gene — negligible. Covering 150 extra genes at ~87%
+power for a strong hit is far better value.
+
+Two practical consequences:
+
+1. **Pick the two best-predicted guides for 2-guide genes, and QC the built
+   library.** The failure mode is a guide missing from the pool, which is
+   visible in the Mock count table before any screen is run —
+   `crispra-screen qc` already tables genes with 0 or 1 detected guide.
+2. **A negative result for a 2-guide gene is weak evidence.** It may simply
+   have been dropped. Treat 2-guide genes as detectable-but-not-excludable, and
+   do not read their absence from a hit list as evidence against them.
+
 ## Standing protocol
 
 1. **Library** — 1,500 prioritised surfaceome genes × 6 guides + 500
