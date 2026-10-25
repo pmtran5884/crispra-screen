@@ -1,0 +1,6 @@
+gene,screen,reads,constructs_obs,read_share_obs_pct,E_implied,cells_sorted_implied
+PROCR,LayV-G round 2,3562000,3228,10.63,2222.0,4229
+PIGR,dIgA,3924,514,15.49,3057.0,624
+FCGR1B,GDF15 sample_1,1116,67,7.706,620.0,70
+GFRAL,GDF15 sample_1,1116,67,0.0,,68
+GFRAL,GDF15 sample_2,1967,874,0.0,,1107

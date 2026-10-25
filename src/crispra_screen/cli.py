@@ -77,6 +77,21 @@ def main(argv=None):
     s.add_argument("--font", default="Arial")
     s.add_argument("--font-size", type=float, default=10.0)
 
+    d = sub.add_parser("design", help="power calculation for a library/sort/depth plan")
+    d.add_argument("--cells-sorted", type=int, required=True,
+                   help="cells you expect the sort to deliver")
+    d.add_argument("--reads", type=int, default=30_000, help="reads you plan to sequence")
+    d.add_argument("--enrichment", type=float, nargs="+", default=[30, 100, 300, 1000],
+                   help="enrichment factors to evaluate (unknowable in advance; "
+                        "pass the range you consider plausible)")
+    d.add_argument("--genes", type=int, default=1500, help="genes in the library")
+    d.add_argument("--guides-per-gene", type=int, default=6)
+    d.add_argument("--controls", type=int, default=500, help="non-targeting guides")
+    d.add_argument("--input-cells", type=int, default=12_500_000,
+                   help="cells going into the sort; with --genes this sets coverage")
+    d.add_argument("--reps", type=int, default=200)
+    d.add_argument("--out", default=None, help="write the table to this CSV")
+
     a = p.parse_args(argv)
     if a.cmd == "qc":
         from .qc import run_qc
@@ -97,6 +112,16 @@ def main(argv=None):
                   depth_check={"on": "always"}.get(a.depth_check, a.depth_check),
                   depth_threshold=a.depth_threshold,
                   n_stability_genes=a.n_stability_genes)
+    elif a.cmd == "design":
+        from .design import power
+        t = power(a.cells_sorted, a.reads, a.enrichment, n_genes=a.genes,
+                  guides_per_gene=a.guides_per_gene, n_controls=a.controls,
+                  input_cells=a.input_cells, reps=a.reps)
+        print(f"[design] library {int(t.n_guides.iloc[0]):,} guides at "
+              f"{int(t.coverage.iloc[0]):,}x coverage")
+        if a.out:
+            t.to_csv(a.out, index=False)
+            print(f"[design] wrote {a.out}")
     return 0
 
 
