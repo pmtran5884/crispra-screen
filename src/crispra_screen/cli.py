@@ -92,6 +92,24 @@ def main(argv=None):
     d.add_argument("--reps", type=int, default=200)
     d.add_argument("--out", default=None, help="write the table to this CSV")
 
+    m = sub.add_parser("demux", help="split one FASTQ into per-sample files by an inline barcode")
+    m.add_argument("--fastq", required=True, help="pooled R1 FASTQ(.gz)")
+    m.add_argument("--barcode", required=True,
+                   help="inline barcode of the non-default sample, e.g. GCCTTG")
+    m.add_argument("--names", default="barcoded,plain",
+                   help="comma-separated output names: barcoded sample first")
+    m.add_argument("--outdir", default="demux_out")
+    m.add_argument("--mismatches", type=int, default=0,
+                   help="barcode mismatches to tolerate. 0 (default) suits NGS, "
+                        "where a 6-nt barcode reads perfectly ~99%% of the time; "
+                        "1 is appropriate for nanopore, where it is ~74%%")
+    m.add_argument("--layout", choices=["auto", "before", "between"], default="auto",
+                   help="where the barcode sits relative to the constant U6 region. "
+                        "auto (default) detects it from the data; getting this "
+                        "wrong shifts every guide by the barcode length")
+    m.add_argument("--scan-window", type=int, default=0)
+    m.add_argument("--forward-only", dest="both_strands", action="store_false")
+
     a = p.parse_args(argv)
     if a.cmd == "qc":
         from .qc import run_qc
@@ -122,6 +140,14 @@ def main(argv=None):
         if a.out:
             t.to_csv(a.out, index=False)
             print(f"[design] wrote {a.out}")
+    elif a.cmd == "demux":
+        from .demux import run_demux
+        nm = tuple(x.strip() for x in a.names.split(","))
+        if len(nm) != 2:
+            raise SystemExit("--names needs exactly two comma-separated names")
+        run_demux(a.fastq, a.barcode, a.outdir, names=nm, mismatches=a.mismatches,
+                  layout=a.layout, scan_window=a.scan_window,
+                  both_strands=a.both_strands)
     return 0
 
 

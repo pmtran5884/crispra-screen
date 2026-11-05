@@ -153,6 +153,51 @@ editable in Illustrator. `--decorated` restores the legend and axis titles,
 
 ---
 
+## `demux` — two samples in one sequencing submission
+
+Pooling two sorts into one submission is free whenever the read budget already
+exceeds what the bins need — an NGS lane against a few thousand sorted cells is
+~100x past saturation, so halving it costs nothing. Add an inline barcode to one
+sample and split the reads afterwards:
+
+```bash
+crispra-screen demux --fastq pooled_R1.fastq.gz --barcode GCCTTG \
+    --names treated,control --outdir demux_out
+# then the usual pipeline on each half
+crispra-screen score --treatment demux_out/treated.fastq --use-bundled-mock --method apron
+```
+
+The barcode may sit either side of the constant U6 region:
+
+```
+before:   [stagger] BARCODE CTTGTGGAAAGGACGAAACACCG [sgRNA]
+between:  [stagger] CTTGTGGAAAGGACGAAACACCG BARCODE [sgRNA]
+```
+
+Which one is in use is **detected from the data, not declared**, because getting
+it wrong silently shifts every guide by the barcode length. In the `between`
+layout the barcode is excised on write, so the emitted FASTQ has the standard
+architecture and every downstream command works unchanged.
+
+Detection refuses rather than guesses. A real inline barcode occupies one
+offset; a string that merely resembles background sequence matches at many
+offsets about equally, and the candidate must beat the surrounding offsets by
+3x before it is believed. Reads carrying the anchor in neither orientation go to
+`unassigned.fastq` rather than being dropped.
+
+**Choosing the barcode.** Check it against the library first: in the bundled
+CRISPRa key, 5 of 24,367 guides begin with `GCCTTG` (0.021%), so in the
+`between` layout that many unbarcoded reads are indistinguishable from barcoded
+ones. `demux` tables them in `demux_ambiguous_guides.csv`. A barcode whose
+prefix is rare among guides keeps that number small.
+
+**`--mismatches`.** 0 (the default) suits NGS, where a 6-nt barcode reads
+perfectly ~99% of the time. On nanopore the same barcode is perfect only ~74% of
+the time, so `--mismatches 1` recovers most of the rest — at the cost of a wider
+collision set (115 guides rather than 5, for `GCCTTG`).
+
+---
+
 ## `design` — how many cells, how many reads, which library?
 
 Before spending cells, ask what a plan can actually detect:
